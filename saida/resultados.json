@@ -1,0 +1,618 @@
+[
+  {
+    "item": 1,
+    "origem": "IMG_9121.jpeg",
+    "indice": 1,
+    "caixa": [
+      1548,
+      1053,
+      2662,
+      1631
+    ],
+    "recorte": "saida/recortes/item001_1.png",
+    "capturado_em": "2026-10-20T20:24:50",
+    "status": "individualizado"
+  },
+  {
+    "item": 2,
+    "origem": "IMG_9122.jpeg",
+    "indice": 1,
+    "caixa": [
+      1622,
+      850,
+      2701,
+      1635
+    ],
+    "recorte": "saida/recortes/item002_1.png",
+    "capturado_em": "2026-10-20T20:24:50",
+    "status": "individualizado"
+  },
+  {
+    "item": 3,
+    "origem": "IMG_9123.jpeg",
+    "indice": 1,
+    "caixa": [
+      1582,
+      951,
+      2665,
+      1689
+    ],
+    "recorte": "saida/recortes/item003_1.png",
+    "capturado_em": "2026-10-20T20:24:51",
+    "status": "individualizado"
+  },
+  {
+    "item": 4,
+    "origem": "IMG_9124.jpeg",
+    "indice": 1,
+    "caixa": [
+      1973,
+      948,
+      3276,
+      1582
+    ],
+    "recorte": "saida/recortes/item004_1.png",
+    "capturado_em": "2026-10-20T20:24:51",
+    "status": "individualizado"
+  },
+  {
+    "item": 5,
+    "origem": "IMG_9125.jpeg",
+    "indice": 1,
+    "caixa": [
+      1561,
+      850,
+      2687,
+      1503
+    ],
+    "recorte": "saida/recortes/item005_1.png",
+    "capturado_em": "2026-10-20T20:24:52",
+    "status": "individualizado"
+  },
+  {
+    "item": 6,
+    "origem": "IMG_9126.jpeg",
+    "indice": 1,
+    "caixa": [
+      1107,
+      891,
+      2237,
+      1494
+    ],
+    "recorte": "saida/recortes/item006_1.png",
+    "capturado_em": "2026-10-20T20:24:52",
+    "status": "individualizado"
+  },
+  {
+    "item": 7,
+    "origem": "IMG_9127.jpeg",
+    "indice": 1,
+    "caixa": [
+      1185,
+      931,
+      2298,
+      1517
+    ],
+    "recorte": "saida/recortes/item007_1.png",
+    "capturado_em": "2026-10-20T20:24:53",
+    "status": "individualizado"
+  },
+  {
+    "item": 8,
+    "origem": "IMG_9128.jpeg",
+    "indice": 1,
+    "caixa": [
+      865,
+      963,
+      2795,
+      1985
+    ],
+    "recorte": "saida/recortes/item008_1.png",
+    "capturado_em": "2026-10-20T20:24:53",
+    "status": "individualizado"
+  },
+  {
+    "item": 9,
+    "origem": "IMG_9129.jpeg",
+    "indice": 1,
+    "caixa": [
+      917,
+      960,
+      2795,
+      1953
+    ],
+    "recorte": "saida/recortes/item009_1.png",
+    "capturado_em": "2026-10-20T20:24:54",
+    "status": "individualizado"
+  },
+  {
+    "item": 10,
+    "origem": "IMG_9130.jpeg",
+    "indice": 1,
+    "caixa": [
+      894,
+      694,
+      2708,
+      1641
+    ],
+    "recorte": "saida/recortes/item010_1.png",
+    "capturado_em": "2026-10-20T20:24:54",
+    "status": "individualizado"
+  },
+  {
+    "item": 11,
+    "origem": "IMG_9131.jpeg",
+    "indice": 1,
+    "caixa": [
+      1198,
+      991,
+      2388,
+      1593
+    ],
+    "recorte": "saida/recortes/item011_1.png",
+    "capturado_em": "2026-10-20T20:24:55",
+    "status": "individualizado"
+  },
+  {
+    "item": 12,
+    "origem": "IMG_9132.jpeg",
+    "indice": 1,
+    "caixa": [
+      1216,
+      998,
+      2293,
+      1540
+    ],
+    "recorte": "saida/recortes/item012_1.png",
+    "capturado_em": "2026-10-20T20:24:55",
+    "status": "individualizado"
+  },
+  {
+    "item": 13,
+    "origem": "IMG_9133.jpeg",
+    "indice": 1,
+    "caixa": [
+      1350,
+      1115,
+      2441,
+      1690
+    ],
+    "recorte": "saida/recortes/item013_1.png",
+    "capturado_em": "2026-10-20T20:24:56",
+    "status": "individualizado"
+  },
+  {
+    "item": 14,
+    "origem": "IMG_9134.jpeg",
+    "indice": 1,
+    "caixa": [
+      911,
+      933,
+      2181,
+      1599
+    ],
+    "recorte": "saida/recortes/item014_1.png",
+    "capturado_em": "2026-10-20T20:24:56",
+    "status": "individualizado"
+  },
+  {
+    "item": 15,
+    "origem": "IMG_9135.jpeg",
+    "indice": 1,
+    "caixa": [
+      979,
+      1047,
+      2217,
+      1671
+    ],
+    "recorte": "saida/recortes/item015_1.png",
+    "capturado_em": "2026-10-20T20:24:57",
+    "status": "individualizado"
+  },
+  {
+    "item": 16,
+    "origem": "IMG_9136.jpeg",
+    "indice": 1,
+    "caixa": [
+      1141,
+      1209,
+      2427,
+      1877
+    ],
+    "recorte": "saida/recortes/item016_1.png",
+    "capturado_em": "2026-10-20T20:24:57",
+    "status": "individualizado"
+  },
+  {
+    "item": 17,
+    "origem": "IMG_9137.jpeg",
+    "indice": 1,
+    "caixa": [
+      1238,
+      1215,
+      2558,
+      1909
+    ],
+    "recorte": "saida/recortes/item017_1.png",
+    "capturado_em": "2026-10-20T20:24:58",
+    "status": "individualizado"
+  },
+  {
+    "item": 18,
+    "origem": "IMG_9138.jpeg",
+    "indice": 1,
+    "caixa": [
+      1459,
+      913,
+      2745,
+      1604
+    ],
+    "recorte": "saida/recortes/item018_1.png",
+    "capturado_em": "2026-10-20T20:24:58",
+    "status": "individualizado"
+  },
+  {
+    "item": 19,
+    "origem": "IMG_9139.jpeg",
+    "indice": 1,
+    "caixa": [
+      1587,
+      832,
+      2744,
+      1450
+    ],
+    "recorte": "saida/recortes/item019_1.png",
+    "capturado_em": "2026-10-20T20:24:59",
+    "status": "individualizado"
+  },
+  {
+    "item": 20,
+    "origem": "IMG_9140.jpeg",
+    "indice": 1,
+    "caixa": [
+      1563,
+      834,
+      2700,
+      1435
+    ],
+    "recorte": "saida/recortes/item020_1.png",
+    "capturado_em": "2026-10-20T20:24:59",
+    "status": "individualizado"
+  },
+  {
+    "item": 21,
+    "origem": "IMG_9141.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      649,
+      2385,
+      2268
+    ],
+    "recorte": "saida/recortes/item021_1.png",
+    "capturado_em": "2026-10-20T20:25:00",
+    "status": "individualizado"
+  },
+  {
+    "item": 22,
+    "origem": "IMG_9142.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      688,
+      2345,
+      2268
+    ],
+    "recorte": "saida/recortes/item022_1.png",
+    "capturado_em": "2026-10-20T20:25:00",
+    "status": "individualizado"
+  },
+  {
+    "item": 23,
+    "origem": "IMG_9143.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      301,
+      1518,
+      2124
+    ],
+    "recorte": "saida/recortes/item023_1.png",
+    "capturado_em": "2026-10-20T20:25:01",
+    "status": "individualizado"
+  },
+  {
+    "item": 23,
+    "origem": "IMG_9143.jpeg",
+    "indice": 2,
+    "caixa": [
+      1269,
+      555,
+      2420,
+      1549
+    ],
+    "recorte": "saida/recortes/item023_2.png",
+    "capturado_em": "2026-10-20T20:25:01",
+    "status": "individualizado"
+  },
+  {
+    "item": 24,
+    "origem": "IMG_9144.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      274,
+      1538,
+      2187
+    ],
+    "recorte": "saida/recortes/item024_1.png",
+    "capturado_em": "2026-10-20T20:25:01",
+    "status": "individualizado"
+  },
+  {
+    "item": 24,
+    "origem": "IMG_9144.jpeg",
+    "indice": 2,
+    "caixa": [
+      1304,
+      536,
+      2455,
+      1568
+    ],
+    "recorte": "saida/recortes/item024_2.png",
+    "capturado_em": "2026-10-20T20:25:01",
+    "status": "individualizado"
+  },
+  {
+    "item": 25,
+    "origem": "IMG_9145.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      308,
+      1581,
+      2212
+    ],
+    "recorte": "saida/recortes/item025_1.png",
+    "capturado_em": "2026-10-20T20:25:02",
+    "status": "individualizado"
+  },
+  {
+    "item": 25,
+    "origem": "IMG_9145.jpeg",
+    "indice": 2,
+    "caixa": [
+      1357,
+      582,
+      2502,
+      1535
+    ],
+    "recorte": "saida/recortes/item025_2.png",
+    "capturado_em": "2026-10-20T20:25:02",
+    "status": "individualizado"
+  },
+  {
+    "item": 26,
+    "origem": "IMG_9146.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      493,
+      2768,
+      2268
+    ],
+    "recorte": "saida/recortes/item026_1.png",
+    "capturado_em": "2026-10-20T20:25:02",
+    "status": "individualizado"
+  },
+  {
+    "item": 27,
+    "origem": "IMG_9147.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      622,
+      2793,
+      2268
+    ],
+    "recorte": "saida/recortes/item027_1.png",
+    "capturado_em": "2026-10-20T20:25:03",
+    "status": "individualizado"
+  },
+  {
+    "item": 28,
+    "origem": "IMG_9148.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      598,
+      2494,
+      2268
+    ],
+    "recorte": "saida/recortes/item028_1.png",
+    "capturado_em": "2026-10-20T20:25:04",
+    "status": "individualizado"
+  },
+  {
+    "item": 29,
+    "origem": "IMG_9149.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      474,
+      1734,
+      1974
+    ],
+    "recorte": "saida/recortes/item029_1.png",
+    "capturado_em": "2026-10-20T20:25:04",
+    "status": "individualizado"
+  },
+  {
+    "item": 29,
+    "origem": "IMG_9149.jpeg",
+    "indice": 2,
+    "caixa": [
+      1261,
+      806,
+      2357,
+      1469
+    ],
+    "recorte": "saida/recortes/item029_2.png",
+    "capturado_em": "2026-10-20T20:25:04",
+    "status": "individualizado"
+  },
+  {
+    "item": 30,
+    "origem": "IMG_9150.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      545,
+      2359,
+      1980
+    ],
+    "recorte": "saida/recortes/item030_1.png",
+    "capturado_em": "2026-10-20T20:25:05",
+    "status": "individualizado"
+  },
+  {
+    "item": 31,
+    "origem": "IMG_9151.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      677,
+      1281,
+      1978
+    ],
+    "recorte": "saida/recortes/item031_1.png",
+    "capturado_em": "2026-10-20T20:25:05",
+    "status": "individualizado"
+  },
+  {
+    "item": 31,
+    "origem": "IMG_9151.jpeg",
+    "indice": 2,
+    "caixa": [
+      1289,
+      671,
+      2451,
+      1270
+    ],
+    "recorte": "saida/recortes/item031_2.png",
+    "capturado_em": "2026-10-20T20:25:05",
+    "status": "individualizado"
+  },
+  {
+    "item": 32,
+    "origem": "IMG_9152.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      862,
+      1327,
+      2018
+    ],
+    "recorte": "saida/recortes/item032_1.png",
+    "capturado_em": "2026-10-20T20:25:06",
+    "status": "individualizado"
+  },
+  {
+    "item": 32,
+    "origem": "IMG_9152.jpeg",
+    "indice": 2,
+    "caixa": [
+      1360,
+      692,
+      2484,
+      1299
+    ],
+    "recorte": "saida/recortes/item032_2.png",
+    "capturado_em": "2026-10-20T20:25:06",
+    "status": "individualizado"
+  },
+  {
+    "item": 33,
+    "origem": "IMG_9153.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      847,
+      2462,
+      2084
+    ],
+    "recorte": "saida/recortes/item033_1.png",
+    "capturado_em": "2026-10-20T20:25:06",
+    "status": "individualizado"
+  },
+  {
+    "item": 34,
+    "origem": "IMG_9154.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      672,
+      2454,
+      1965
+    ],
+    "recorte": "saida/recortes/item034_1.png",
+    "capturado_em": "2026-10-20T20:25:07",
+    "status": "individualizado"
+  },
+  {
+    "item": 35,
+    "origem": "IMG_9155.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      376,
+      1901,
+      1847
+    ],
+    "recorte": "saida/recortes/item035_1.png",
+    "capturado_em": "2026-10-20T20:25:07",
+    "status": "individualizado"
+  },
+  {
+    "item": 35,
+    "origem": "IMG_9155.jpeg",
+    "indice": 2,
+    "caixa": [
+      1252,
+      747,
+      2432,
+      1455
+    ],
+    "recorte": "saida/recortes/item035_2.png",
+    "capturado_em": "2026-10-20T20:25:07",
+    "status": "individualizado"
+  },
+  {
+    "item": 36,
+    "origem": "IMG_9156.jpeg",
+    "indice": 1,
+    "caixa": [
+      0,
+      295,
+      1845,
+      1806
+    ],
+    "recorte": "saida/recortes/item036_1.png",
+    "capturado_em": "2026-10-20T20:25:08",
+    "status": "individualizado"
+  },
+  {
+    "item": 36,
+    "origem": "IMG_9156.jpeg",
+    "indice": 2,
+    "caixa": [
+      1290,
+      669,
+      2462,
+      1404
+    ],
+    "recorte": "saida/recortes/item036_2.png",
+    "capturado_em": "2026-10-20T20:25:08",
+    "status": "individualizado"
+  }
+]
