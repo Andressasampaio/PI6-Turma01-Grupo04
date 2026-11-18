@@ -36,6 +36,13 @@ def normalizar_leitura(valor):
     return "".join(texto.split())
 
 
+def normalizar_lote(valor):
+    texto = normalizar_leitura(valor)
+    if texto.startswith("L") and texto[1:].isdigit():
+        texto = texto[1:]
+    return texto
+
+
 def avaliar_conformidade_gabarito(detected, ocr):
     lote = ocr.get("lote")
     fabricacao = ocr.get("fabricacao")
@@ -48,7 +55,9 @@ def avaliar_conformidade_gabarito(detected, ocr):
         return "Não Conforme", "Etiqueta ilegível ou leitura OCR incompleta"
 
     divergencias = []
-    for campo, rotulo in (("lote", "Lote"), ("fabricacao", "Fabricação"), ("validade", "Validade")):
+    if normalizar_lote(lote) != normalizar_lote(GABARITO["lote"]):
+        divergencias.append(f"Lote divergente: {normalizar_lote(lote)} (gabarito {GABARITO['lote']})")
+    for campo, rotulo in (("fabricacao", "Fabricação"), ("validade", "Validade")):
         if normalizar_leitura(ocr.get(campo)) != normalizar_leitura(GABARITO[campo]):
             divergencias.append(f"{rotulo} divergente: {ocr.get(campo)} (gabarito {GABARITO[campo]})")
     if divergencias:
@@ -142,6 +151,13 @@ def import_test_images():
                         "SELECT id, lot_read, manufacturing_read, expiry_read, detected, ai_status "
                         "FROM inspections WHERE image_path = ?", (stored_path,)
                     ).fetchone()
+                    if existing:
+                        cleaned_lot = normalizar_lote(existing["lot_read"])
+                        existing_connection.execute(
+                            "UPDATE inspections SET lot_read = ?, expected_lot = ? WHERE id = ?",
+                            (cleaned_lot or existing["lot_read"], GABARITO["lote"], existing["id"])
+                        )
+                        existing_connection.commit()
                     if existing and existing["ai_status"] == "Em avaliação":
                         existing_ocr = {
                             "lote": existing["lot_read"],
@@ -179,7 +195,9 @@ def import_test_images():
                 if detected and detection.get("crop_image"):
                     ocr = processar_etiqueta(detection["crop_image"])
 
-                lot = ocr.get("lote")
+                lot = normalizar_lote(ocr.get("lote"))
+                if lot:
+                    ocr["lote"] = lot
                 manufacturing = ocr.get("fabricacao")
                 expiry = ocr.get("validade")
                 ocr_errors = ocr.get("erros", [])
