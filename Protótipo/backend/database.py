@@ -5,14 +5,16 @@ DATABASE_PATH = Path(__file__).parent / "ivis.db"
 
 
 def get_connection():
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 30000")
     return connection
 
 
 def initialize_database():
     connection = get_connection()
+    connection.execute("PRAGMA journal_mode = WAL")
 
     connection.execute("""
         CREATE TABLE IF NOT EXISTS inspections (
@@ -47,7 +49,6 @@ def initialize_database():
         )
     """)
 
-    # Atualiza bancos já existentes sem apagar os registros anteriores.
     feedback_columns = {
         row[1] for row in connection.execute("PRAGMA table_info(feedbacks)").fetchall()
     }
