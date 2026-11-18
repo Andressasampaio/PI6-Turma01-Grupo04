@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity, LayoutDashboard, ScanSearch, ClipboardList, Bell,
   CheckCircle2, AlertTriangle, XCircle, Clock3, Package, Camera,
@@ -6,73 +6,43 @@ import {
   Filter, Check, Download, Save, ArrowLeft, FileCheck2
 } from 'lucide-react'
 
-const initialSamples = [
-  {
-    id: '0843',
-    imageSrc: '/dataset/Conforme%20(Correto).png',
-    product: 'Paracetamol 750mg',
-    lotRead: 'L100648',
-    expectedLot: 'L100648',
-    expiryRead: 'JUL/2027',
-    expectedExpiry: 'JUL/2027',
-    defect: 'Nenhum defeito identificado',
-    reason: 'O lote e a validade estão legíveis e correspondem ao gabarito.',
-    aiStatus: 'Conforme',
-    aiFinding: 'Nenhuma não conformidade identificada',
-    imageExpiry: 'JUL/2027',
-    imageLot: 'L100648',
-  },
-  {
-  id: '0844',
-  imageSrc: '/dataset/Não%20conforme%20(Correto).png',
-  product: 'Paracetamol 750mg',
-  lotRead: 'Não identificado',
-  expectedLot: 'L100648',
-  expiryRead: 'Não identificado',
-  expectedExpiry: 'JUL/2027',
-  defect: 'Imagem ilegível',
-  reason: 'A imagem capturada está desfocada, impedindo a leitura confiável do lote e da validade.',
-  aiStatus: 'Não Conforme',
-  aiFinding: 'Imagem ilegível — leitura OCR inconclusiva',
-  imageExpiry: 'Não identificado',
-  imageLot: 'Não identificado',
-  },
-  {
-  id: '0845',
-  imageSrc: '/dataset/Conforme%20(Incorreto).png',
-  product: 'Paracetamol 750mg',
-  lotRead: 'L100648',
-  expectedLot: 'L100648',
-  expiryRead: 'JUL/2027',
-  expectedExpiry: 'JUL/2027',
-  defect: 'Nenhum defeito identificado',
-  reason: 'O lote e a validade estão legíveis e correspondem ao gabarito.',
-  aiStatus: 'Conforme',
-  aiFinding: 'Nenhuma não conformidade identificada',
-  imageExpiry: 'JUL/2027',
-  imageLot: 'L100648',
-  },
-  {
-    id: '0846',
-    imageSrc: '/dataset/Não%20conforme%20(Incorreto).png',
-    product: 'Paracetamol 750mg',
-    lotRead: 'L100649',
-    expectedLot: 'L100648',
-    expiryRead: 'JUL/2027',
-    expectedExpiry: 'JUL/2027',
-    defect: 'Divergência de lote identificada',
-    reason: 'O lote impresso (L100649) diverge do gabarito (L100648).',
-    aiStatus: 'Não Conforme',
-    aiFinding: 'Divergência de lote identificada',
-    imageExpiry: 'JUL/2027',
-    imageLot: 'L100648',
-  },
-]
-
 const isConforming = value => ['Aprovado', 'Conforme'].includes(value)
+
+function normalizeLot(value) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/^L(?=\d+$)/, '')
+}
 
 // Usa o mesmo computador que entregou o frontend; funciona também pela rede local.
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:5000/api`
+
+async function analyzeImage(file) {
+  const formData = new FormData()
+  formData.append('image', file)
+
+  const response = await fetch(`${API_BASE}/detect`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(result.error || `Erro na análise (${response.status})`)
+  }
+
+  return result
+}
+
+function backendImageUrl(path) {
+  if (!path) return ''
+  if (path.startsWith('http')) return path
+
+  return `${window.location.protocol}//${window.location.hostname}:5000${path}`
+}
 
 // O SQLite grava CURRENT_TIMESTAMP em UTC. A conversão abaixo é apenas visual:
  // os horários continuam armazenados em UTC no banco.
@@ -115,34 +85,167 @@ const navItems = [
 
 function App() {
   const [page, setPage] = useState('dashboard')
-  const [samples, setSamples] = useState(initialSamples)
-  const [selectedId, setSelectedId] = useState('0843')
+  const [samples, setSamples] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
   const [history, setHistory] = useState([])
   const [stats, setStats] = useState({ total: 0, conformes: 0, nao_conformes: 0, pendentes: 0 })
   const [loading, setLoading] = useState(true)
   const [correctedLot, setCorrectedLot] = useState('')
   const [correctedExpiry, setCorrectedExpiry] = useState('')
+  const [correctedManufacturing, setCorrectedManufacturing] = useState('')
   const [correctedStatus, setCorrectedStatus] = useState('Conforme')
   const [correctionNote, setCorrectionNote] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
   const [toast, setToast] = useState('')
   const [filter, setFilter] = useState('Todos')
 
-  const currentSample = samples.find(item => item.id === selectedId) || samples[0]
-  const pendingSamples = samples.filter(item => !item.evaluated)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [liveSample, setLiveSample] = useState(null)
+  const [analysisError, setAnalysisError] = useState('')
+  const importImagesPromise = useRef(null)
+
+  const currentSample =
+  liveSample?.id === selectedId
+    ? liveSample
+    : samples.find(item => item.id === selectedId) || samples[0]
+  const pendingSamples = samples.filter(item => item.databaseId && !item.evaluated)
   const pendingCount = pendingSamples.length
   const approvedCount = stats.conformes
   const rejectedCount = stats.nao_conformes
 
+  const handleImageUpload = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  if (!file.type.startsWith('image/')) {
+    notify('Selecione um arquivo de imagem válido.')
+    return
+  }
+
+  setAnalyzing(true)
+  setAnalysisError('')
+  setLiveSample(null)
+
+  try {
+    const result = await analyzeImage(file)
+    const ocr = result.ocr || {}
+
+    const lotRead = normalizeLot(ocr.lote) || 'Não identificado'
+    const expiryRead = ocr.validade || 'Não identificado'
+    const manufacturingRead = ocr.fabricacao || 'Não identificado'
+    const errors = Array.isArray(ocr.erros) ? ocr.erros : []
+
+    const detected = result.detected !== false
+    const gabarito = { lote: '100648', fabricacao: 'JUL/2025', validade: 'JUL/2027' }
+    const normalize = value => String(value || '').toUpperCase().replace(/\s+/g, '')
+    const readable = [lotRead, manufacturingRead, expiryRead].every(value =>
+      value && !['NÃO IDENTIFICADO', 'NÃO LEGÍVEL'].includes(String(value).toUpperCase())
+    )
+    const matchesGabarito = detected && readable &&
+      normalizeLot(lotRead) === normalizeLot(gabarito.lote) &&
+      normalize(manufacturingRead) === normalize(gabarito.fabricacao) &&
+      normalize(expiryRead) === normalize(gabarito.validade)
+    const aiStatus = matchesGabarito ? 'Conforme' : 'Não Conforme'
+    const aiFinding = !detected
+      ? 'Embalagem não localizada pelo YOLO'
+      : !readable
+        ? 'Etiqueta ilegível ou leitura OCR incompleta'
+        : matchesGabarito
+          ? 'Lote, fabricação e validade correspondem ao gabarito'
+          : 'Divergência entre a leitura OCR e o gabarito'
+
+    const newSample = {
+      id: `IMG-${Date.now()}`,
+      product: 'Embalagem detectada',
+      lotRead,
+      expectedLot: gabarito.lote,
+      expiryRead,
+      expectedExpiry: gabarito.validade,
+      expectedManufacturing: gabarito.fabricacao,
+      manufacturingRead,
+      defect: aiStatus === 'Conforme' ? 'Nenhuma divergência identificada' : aiFinding,
+      reason: aiFinding,
+      aiStatus,
+      aiFinding,
+      imageSrc: backendImageUrl(result.annotated_image || result.image_url || result.image),
+      cropSrc: backendImageUrl(result.crop_image),
+      originalImageSrc: URL.createObjectURL(file),
+      imagePath: result.image_path || result.filename || file.name,
+      errors,
+      detected,
+      ocrApproved: Boolean(ocr.aprovado),
+      evaluated: false,
+    }
+
+    setLiveSample(newSample)
+    setSelectedId(newSample.id)
+    notify('Imagem analisada pelo backend.')
+  } catch (error) {
+    setAnalysisError(error.message)
+    notify(`Erro ao analisar imagem: ${error.message}`)
+  } finally {
+    setAnalyzing(false)
+    event.target.value = ''
+  }
+}
+
   const loadData = async () => {
     setLoading(true)
     try {
+      // Compartilha a mesma requisição se dois efeitos/telas tentarem importar ao mesmo tempo.
+      if (!importImagesPromise.current) {
+        importImagesPromise.current = apiRequest('/import-test-images', { method: 'POST' })
+          .finally(() => { importImagesPromise.current = null })
+      }
+      await importImagesPromise.current
+
       const [inspections, feedbacks, nextStats] = await Promise.all([
         apiRequest('/inspections'), apiRequest('/feedbacks'), apiRequest('/stats'),
       ])
       const feedbackByInspection = new Map(feedbacks.map(item => [item.inspection_id, item]))
-      const registeredSamples = new Map(inspections.map(item => [String(item.image_path || ''), item]))
-      setSamples(initialSamples.map(sample => ({ ...sample, evaluated: registeredSamples.has(sample.id) })))
+
+      const importedSamples = inspections.map(item => {
+        let errors = []
+        try { errors = item.ocr_errors ? JSON.parse(item.ocr_errors) : [] } catch { errors = [] }
+
+        const originalName = String(item.image_path || '').replace(/^test_images[\\/]/, '')
+        const originalUrl = originalName
+          ? backendImageUrl(`/api/test-images/${encodeURIComponent(originalName)}`)
+          : ''
+        const annotatedUrl = item.annotated_image
+          ? backendImageUrl(`/api/processed/${encodeURIComponent(item.annotated_image)}`)
+          : originalUrl
+        const cropUrl = item.crop_image
+          ? backendImageUrl(`/api/processed/${encodeURIComponent(item.crop_image)}`)
+          : ''
+
+        return {
+          id: String(item.id),
+          databaseId: item.id,
+          product: item.product || 'Embalagem',
+          lotRead: normalizeLot(item.lot_read) || 'Não identificado',
+          expectedLot: normalizeLot(item.expected_lot || '100648'),
+          manufacturingRead: item.manufacturing_read || 'Não identificado',
+          expiryRead: item.expiry_read || 'Não identificado',
+          expectedExpiry: item.expected_expiry || 'JUL/2027',
+          expectedManufacturing: item.expected_manufacturing || 'JUL/2025',
+          defect: item.ai_finding || 'Aguardando conferência',
+          reason: item.ai_finding || 'Aguardando conferência do operador.',
+          aiStatus: item.ai_status || 'Em avaliação',
+          aiFinding: item.ai_finding || 'Aguardando conferência',
+          imageSrc: annotatedUrl,
+          cropSrc: cropUrl,
+          originalImageSrc: originalUrl,
+          imagePath: item.image_path,
+          errors,
+          detected: Boolean(item.detected),
+          ocrApproved: Boolean(item.lot_read && item.manufacturing_read && item.expiry_read && errors.length === 0),
+          evaluated: Boolean(item.operator_status),
+          operatorStatus: item.operator_status,
+        }
+      })
+
+      setSamples(importedSamples)
       setStats(nextStats)
       setHistory(inspections.map(item => {
         const feedback = feedbackByInspection.get(item.id)
@@ -150,7 +253,7 @@ function App() {
         const lot = feedback?.corrected_lot || item.lot_read || '—'
         const expiry = feedback?.corrected_expiry || item.expiry_read || '—'
         const correction = feedback
-          ? `Lote: ${item.lot_read || '—'} → ${lot} | Validade: ${item.expiry_read || '—'} → ${expiry}${feedback.correction_note ? ` | Observação: ${feedback.correction_note}` : ''}`
+          ? `Lote: ${item.lot_read || '—'} → ${lot} | Fabricação: ${item.manufacturing_read || '—'} → ${feedback.corrected_manufacturing || item.manufacturing_read || '—'} | Validade: ${item.expiry_read || '—'} → ${expiry}${feedback.correction_note ? ` | Observação: ${feedback.correction_note}` : ''}`
           : '—'
         return {
           id: `IV-${String(item.id).padStart(6, '0')}`, product: item.product, lot, expiry,
@@ -171,36 +274,45 @@ function App() {
     window.__ivisToastTimer = window.setTimeout(() => setToast(''), 2800)
   }
 
-  const go = (id) => { setPage(id); setMobileMenu(false) }
+  const go = (id) => { setPage(id); setMobileMenu(false); if (id === 'inspection') loadData() }
 
   const selectSample = (id) => setSelectedId(id)
 
   const confirmInspection = async () => {
-    if (!currentSample || currentSample.evaluated) return
-    try {
-      await apiRequest('/inspections', {
-        method: 'POST',
-        body: JSON.stringify({
-          product: currentSample.product,
-          lot_read: currentSample.lotRead,
-          expected_lot: currentSample.expectedLot,
-          expiry_read: currentSample.expiryRead,
-          expected_expiry: currentSample.expectedExpiry,
-          ai_status: currentSample.aiStatus,
-          ai_finding: currentSample.aiFinding,
-          image_path: currentSample.id,
-          operator_status: currentSample.aiStatus,
-          operator_action: isConforming(currentSample.aiStatus) ? 'Aprovação confirmada' : 'Reprovação confirmada',
-        }),
-      })
-      await loadData()
-      notify(`Resultado confirmado: ${isConforming(currentSample.aiStatus) ? 'CONFORME' : 'NÃO CONFORME'}.`)
-    } catch (error) { notify(`Erro ao salvar inspeção: ${error.message}`) }
+  if (!currentSample || currentSample.evaluated) return
+
+  try {
+    await apiRequest('/inspections', {
+      method: 'POST',
+      body: JSON.stringify({
+        product: currentSample.product,
+        lot_read: currentSample.lotRead,
+        expected_lot: currentSample.expectedLot,
+        expiry_read: currentSample.expiryRead,
+        expected_expiry: currentSample.expectedExpiry,
+        ai_status: currentSample.aiStatus,
+        ai_finding: currentSample.aiFinding,
+        image_path: currentSample.imagePath || currentSample.id,
+        operator_status: currentSample.aiStatus,
+        operator_action: 'Inspeção registrada pelo operador',
+      }),
+    })
+
+    if (liveSample?.id === currentSample.id) {
+      setLiveSample({ ...liveSample, evaluated: true })
+    }
+
+    await loadData()
+    notify('Inspeção registrada com sucesso.')
+  } catch (error) {
+    notify(`Erro ao salvar inspeção: ${error.message}`)
   }
+}
 
   const openCorrection = () => {
-    setCorrectedLot(currentSample.lotRead === 'Não legível' ? '' : currentSample.lotRead)
-    setCorrectedExpiry(currentSample.expiryRead === 'Não legível' ? '' : currentSample.expiryRead)
+    setCorrectedLot(['Não legível', 'Não identificado'].includes(currentSample.lotRead) ? '' : normalizeLot(currentSample.lotRead))
+    setCorrectedExpiry(currentSample.expiryRead === 'Não identificado' ? '' : currentSample.expiryRead)
+    setCorrectedManufacturing(currentSample.manufacturingRead === 'Não identificado' ? '' : (currentSample.manufacturingRead || ''))
     setCorrectedStatus(currentSample.aiStatus)
     setCorrectionNote('')
     setPage('correction')
@@ -211,28 +323,48 @@ function App() {
       notify('Informe o lote e a validade corretos. Se algum dado não puder ser recuperado, registre isso na observação.')
       return
     }
+
     try {
-      await apiRequest('/inspections', {
-        method: 'POST',
-        body: JSON.stringify({
-          product: currentSample.product,
-          lot_read: currentSample.lotRead,
-          expected_lot: currentSample.expectedLot,
-          expiry_read: currentSample.expiryRead,
-          expected_expiry: currentSample.expectedExpiry,
-          ai_status: currentSample.aiStatus,
-          ai_finding: currentSample.aiFinding,
-          image_path: currentSample.id,
-          corrected_status: correctedStatus,
-          corrected_lot: correctedLot.trim(),
-          corrected_expiry: correctedExpiry.trim(),
-          correction_note: correctionNote.trim(),
-        }),
-      })
+      const correctionData = {
+        corrected_status: correctedStatus,
+        corrected_lot: normalizeLot(correctedLot),
+        corrected_manufacturing: correctedManufacturing.trim(),
+        corrected_expiry: correctedExpiry.trim(),
+        correction_note: correctionNote.trim(),
+      }
+
+      if (currentSample.databaseId) {
+        await apiRequest(`/inspections/${currentSample.databaseId}/feedback`, {
+          method: 'POST',
+          body: JSON.stringify(correctionData),
+        })
+      } else {
+        await apiRequest('/inspections', {
+          method: 'POST',
+          body: JSON.stringify({
+            product: currentSample.product,
+            lot_read: currentSample.lotRead,
+            expected_lot: currentSample.expectedLot,
+            manufacturing_read: currentSample.manufacturingRead,
+            expiry_read: currentSample.expiryRead,
+            expected_expiry: currentSample.expectedExpiry,
+            ai_status: currentSample.aiStatus,
+            ai_finding: currentSample.aiFinding,
+            image_path: currentSample.id,
+            operator_status: correctedStatus,
+            operator_action: 'Corrigido pelo operador',
+            ...correctionData,
+          }),
+        })
+      }
+
       await loadData()
       setPage('inspection')
+      setLiveSample(null)
       notify(`Correção salva. Resultado final: ${isConforming(correctedStatus) ? 'CONFORME' : 'NÃO CONFORME'}.`)
-    } catch (error) { notify(`Erro ao salvar correção: ${error.message}`) }
+    } catch (error) {
+      notify(`Erro ao salvar correção: ${error.message}`)
+    }
   }
 
   const exportCsv = () => {
@@ -312,47 +444,128 @@ function App() {
     <>
       <Header title="Inspeção" subtitle="Acompanhe a análise automática e confirme ou corrija o resultado." />
       <section className="stats-grid inspection-stats">
-        <div className="stat-card compact-stat"><span>Itens de demonstração</span><strong>{samples.length}</strong></div>
-        <div className="stat-card compact-stat"><span>Conformes na amostra</span><strong className="green-text">{samples.filter(item => isConforming(item.aiStatus)).length}</strong></div>
-        <div className="stat-card compact-stat"><span>Não conformes na amostra</span><strong className="red-text">{samples.filter(item => !isConforming(item.aiStatus)).length}</strong></div>
+        <div className="stat-card compact-stat"><span>Itens no lote</span><strong>{stats.total}</strong></div>
+        <div className="stat-card compact-stat"><span>Conformes</span><strong className="green-text">{stats.conformes}</strong></div>
+        <div className="stat-card compact-stat"><span>Não conformes</span><strong className="red-text">{stats.nao_conformes}</strong></div>
         <div className="stat-card compact-stat"><span>Aguardando avaliação</span><strong>{pendingCount}</strong></div>
       </section>
+
       <section className="panel sample-selector">
-        <div className="panel-heading"><div><h3>Itens aguardando avaliação</h3><p>Selecione um item para conferir o resultado apresentado pela IA.</p></div><span className="status warning"><span /> {pendingCount} pendentes</span></div>
-        <div className="sample-buttons">{pendingSamples.map(item => <button key={item.id} className={selectedId === item.id ? 'sample-button active' : 'sample-button'} onClick={() => selectSample(item.id)}><div className="sample-number">#{item.id}</div><div className="sample-info"><strong>{item.product}</strong><small>{item.aiFinding}</small></div><Status value={item.aiStatus} /></button>)}</div>
-        {pendingCount === 0 && <div className="empty-state">Todos os itens desta demonstração já foram avaliados.</div>}
-      </section>
-      {currentSample && !currentSample.evaluated && <>
-        <section className="panel reference-panel"><div className="panel-heading"><div><h3><Package size={18} /> Gabarito dinâmico do lote</h3><p>Referência formada automaticamente a partir dos primeiros itens do lote.</p></div><span className="tag">LOTE ATUAL</span></div><div className="reference-values"><div><label>LOTE DE REFERÊNCIA</label><strong className="mono">{currentSample.expectedLot}</strong></div><div><label>VALIDADE DE REFERÊNCIA</label><strong>{currentSample.expectedExpiry}</strong></div><div><label>ORIGEM DO GABARITO</label><strong>Primeiros itens do lote</strong></div></div></section>
-        <div className="inspection-layout">
-          <section className="panel image-panel"><div className="panel-heading"><div><h3><Camera size={18} /> Imagem da embalagem</h3><p>Visualização da amostra selecionada</p></div><span className="tag">AMOSTRA #{currentSample.id}</span></div>
-            <div className="package-stage dataset-stage"><img className="dataset-image" src={currentSample.imageSrc} alt={`Imagem real da amostra ${currentSample.id} do dataset IVIS`} /><div className="scan-corner tl" /><div className="scan-corner tr" /><div className="scan-corner bl" /><div className="scan-corner br" /></div>
-          </section>
-          <section className="panel result-panel"><div className="panel-heading"><div><h3>Resultado da análise</h3><p>Leitura OCR e validações OCV</p></div><Status value={currentSample.aiStatus} /></div>
-            <div className={`result-verdict ${isConforming(currentSample.aiStatus) ? 'approved' : 'rejected'}`}>
-              {isConforming(currentSample.aiStatus)
-                ? <CheckCircle2 size={34} />
-                : <XCircle size={34} />
-              }
-              <div>
-                <span>RESULTADO DA ANÁLISE</span>
-                <strong>{isConforming(currentSample.aiStatus) ? 'CONFORME' : 'NÃO CONFORME'}</strong>
-                <small>
-                  {isConforming(currentSample.aiStatus)
-                    ? 'A IA identificou a embalagem como conforme.'
-                    : 'A IA identificou uma não conformidade na embalagem.'}
-                </small>
-              </div>
-            </div>
-            <div className="data-fields"><div><label>PRODUTO</label><strong>{currentSample.product}</strong></div><div><label>LOTE LIDO (OCR)</label><strong className="mono">{currentSample.lotRead}</strong></div><div><label>LOTE DE REFERÊNCIA</label><strong className="mono">{currentSample.expectedLot}</strong></div><div><label>VALIDADE LIDA (OCR)</label><strong>{currentSample.expiryRead}</strong></div><div><label>VALIDADE DE REFERÊNCIA</label><strong>{currentSample.expectedExpiry}</strong></div></div>
-            <div className="analysis-checks"><div><CheckCircle2 /> Etiqueta localizada</div><div className={currentSample.lotRead === currentSample.expectedLot ? 'check-ok' : 'check-error'}>{currentSample.lotRead === currentSample.expectedLot ? <CheckCircle2 /> : <XCircle />}{currentSample.lotRead === currentSample.expectedLot ? 'Lote corresponde ao gabarito' : 'Lote divergente do gabarito'}</div><div className={currentSample.expiryRead === currentSample.expectedExpiry ? 'check-ok' : 'check-error'}>{currentSample.expiryRead === currentSample.expectedExpiry ? <CheckCircle2 /> : <XCircle />}{currentSample.expiryRead === currentSample.expectedExpiry ? 'Validade corresponde ao gabarito' : 'Validade ilegível ou divergente'}</div><div className="check-ok"><CheckCircle2 /> Verificação de formato executada</div></div>
-            <div className="operator-feedback"><h4>Avaliação do operador</h4><p>{currentSample.reason} Se a análise estiver correta, confirme. Se a IA tiver errado, solicite a correção.</p>
-              <div className="inspection-actions"><button className="primary-button" onClick={confirmInspection}><Check size={17} /> Confirmar resultado</button><button className="secondary-button correction-action" onClick={openCorrection}><AlertTriangle size={16} /> Corrigir resultado</button></div>
-              <small className="action-hint">Confirmar mantém o veredito da IA. Corrigir abre uma tela separada para ajustar os dados e o resultado final.</small>
-            </div>
-          </section>
+        <div className="panel-heading">
+          <div>
+            <h3>Itens aguardando avaliação</h3>
+            <p>Selecione um item para conferir o resultado apresentado pela IA.</p>
+          </div>
+          <span className="status warning"><span /> {pendingCount} pendentes</span>
         </div>
-      </>}
+        {pendingCount > 0 ? (
+          <div className="sample-buttons">
+            {pendingSamples.map(item => (
+              <button
+                key={item.databaseId}
+                className={selectedId === item.id ? 'sample-button active' : 'sample-button'}
+                onClick={() => { setLiveSample(null); selectSample(item.id) }}
+              >
+                <div className="sample-number">#{String(item.databaseId).padStart(4, '0')}</div>
+                <div className="sample-info">
+                  <strong>{item.product}</strong>
+                  <small>{item.aiFinding}</small>
+                </div>
+                <Status value={item.aiStatus} />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">Nenhuma inspeção pendente. Novas imagens da pasta test_images serão importadas automaticamente.</div>
+        )}
+      </section>
+
+      {currentSample && !currentSample.evaluated && (
+        <>
+          <section className="panel reference-panel">
+            <div className="panel-heading">
+              <div>
+                <h3><Package size={18} /> Gabarito dinâmico do lote</h3>
+                <p>Referência utilizada para validar os dados identificados na embalagem.</p>
+              </div>
+              <span className="tag">LOTE ATUAL</span>
+            </div>
+            <div className="reference-values">
+              <div><label>LOTE DE REFERÊNCIA</label><strong className="mono">{normalizeLot(currentSample.expectedLot || '100648')}</strong></div>
+              <div><label>VALIDADE DE REFERÊNCIA</label><strong>{currentSample.expectedExpiry || 'JUL/2027'}</strong></div>
+              <div><label>ORIGEM DO GABARITO</label><strong>Gabarito fixo do produto</strong></div>
+            </div>
+          </section>
+
+          <div className="inspection-layout">
+            <section className="panel image-panel">
+              <div className="panel-heading">
+                <div><h3><Camera size={18} /> Imagem da embalagem</h3><p>Visualização da amostra selecionada</p></div>
+                <span className="tag">AMOSTRA #{String(currentSample.databaseId || currentSample.id).padStart(4, '0')}</span>
+              </div>
+              <div className="package-stage dataset-stage">
+                <img className="dataset-image" src={currentSample.imageSrc || currentSample.originalImageSrc} alt="Imagem analisada pelo IVIS" />
+                <div className="scan-corner tl" /><div className="scan-corner tr" />
+                <div className="scan-corner bl" /><div className="scan-corner br" />
+              </div>
+            </section>
+
+            <section className="panel result-panel">
+              <div className="panel-heading">
+                <div><h3>Resultado da análise</h3><p>Leitura OCR e validações OCV</p></div>
+                <Status value={currentSample.aiStatus} />
+              </div>
+              <div className={`result-verdict ${isConforming(currentSample.aiStatus) ? 'approved' : 'rejected'}`}>
+                {isConforming(currentSample.aiStatus) ? <CheckCircle2 size={34} /> : <XCircle size={34} />}
+                <div>
+                  <span>RESULTADO DA ANÁLISE</span>
+                  <strong>{isConforming(currentSample.aiStatus) ? 'CONFORME' : 'NÃO CONFORME'}</strong>
+                  <small>{currentSample.reason}</small>
+                </div>
+              </div>
+              <div className="data-fields">
+                <div><label>PRODUTO</label><strong>{currentSample.product}</strong></div>
+                <div><label>LOTE LIDO (OCR)</label><strong className="mono">{normalizeLot(currentSample.lotRead) || 'Não identificado'}</strong></div>
+                <div><label>LOTE DE REFERÊNCIA</label><strong className="mono">{normalizeLot(currentSample.expectedLot || '100648')}</strong></div>
+                <div><label>VALIDADE LIDA (OCR)</label><strong>{currentSample.expiryRead}</strong></div>
+                <div><label>VALIDADE DE REFERÊNCIA</label><strong>{currentSample.expectedExpiry || 'JUL/2027'}</strong></div>
+              </div>
+              <div className="analysis-checks">
+                <div className={currentSample.detected ? 'check-ok' : 'check-error'}>
+                  {currentSample.detected ? <CheckCircle2 /> : <XCircle />}
+                  {currentSample.detected ? 'Etiqueta localizada' : 'Embalagem não localizada'}
+                </div>
+                <div className={normalizeLot(currentSample.lotRead) === normalizeLot(currentSample.expectedLot || '100648') ? 'check-ok' : 'check-error'}>
+                  {normalizeLot(currentSample.lotRead) === normalizeLot(currentSample.expectedLot || '100648') ? <CheckCircle2 /> : <XCircle />}
+                  {normalizeLot(currentSample.lotRead) === normalizeLot(currentSample.expectedLot || '100648') ? 'Lote corresponde ao gabarito' : 'Lote divergente do gabarito'}
+                </div>
+                <div className={currentSample.expiryRead === currentSample.expectedExpiry ? 'check-ok' : 'check-error'}>
+                  {currentSample.expiryRead === currentSample.expectedExpiry ? <CheckCircle2 /> : <XCircle />}
+                  {currentSample.expiryRead === currentSample.expectedExpiry ? 'Validade corresponde ao gabarito' : 'Validade ilegível ou divergente'}
+                </div>
+                <div className={currentSample.ocrApproved ? 'check-ok' : 'check-error'}>
+                  {currentSample.ocrApproved ? <CheckCircle2 /> : <AlertTriangle />}
+                  {currentSample.ocrApproved ? 'Verificação de formato executada' : 'OCR inconclusivo'}
+                </div>
+              </div>
+              <div className="operator-feedback">
+                <h4>Avaliação do operador</h4>
+                <p>{currentSample.reason} Se a análise estiver correta, confirme. Se a IA tiver errado, solicite a correção.</p>
+                <div className="inspection-actions">
+                  <button className="primary-button" onClick={confirmInspection} disabled={currentSample.evaluated}>
+                    <Check size={17} /> Confirmar resultado
+                  </button>
+                  <button className="secondary-button correction-action" onClick={openCorrection}>
+                    <AlertTriangle size={16} /> Corrigir resultado
+                  </button>
+                </div>
+                <small className="action-hint">Confirmar mantém o veredito da IA. Corrigir abre uma tela separada para ajustar os dados e o resultado final.</small>
+              </div>
+            </section>
+          </div>
+        </>
+      )}
+
     </>
   )
 
@@ -391,11 +604,15 @@ function App() {
     </>
   )
 
-  const content = { dashboard: Dashboard(), inspection: Inspection(), correction: Correction(), history: History() }
+  const content =
+    page === 'dashboard' ? Dashboard()
+      : page === 'inspection' ? Inspection()
+        : page === 'correction' ? (currentSample ? Correction() : Inspection())
+          : History()
   return <div className="app-shell">
     <aside className={`sidebar ${mobileMenu ? 'mobile-open' : ''}`}><div className="brand"><div className="brand-mark"><Activity size={23} /></div><div><strong>IVIS<span>.</span></strong><small>INTELLIGENT INSPECTION</small></div><button className="mobile-close" onClick={() => setMobileMenu(false)}><X /></button></div><div className="side-label">MENU PRINCIPAL</div><nav>{navItems.map(item => { const Icon = item.icon; const active = page === item.id || (page === 'correction' && item.id === 'inspection'); return <button key={item.id} className={active ? 'nav-item active' : 'nav-item'} onClick={() => go(item.id)}><Icon size={19} /><span>{item.label}</span>{active && <i />}</button> })}</nav><div className="sidebar-bottom"><div className="offline"><span /> SISTEMA OPERACIONAL</div><div className="side-version">IVIS <span>v0.3.0</span></div></div></aside>
     {mobileMenu && <div className="mobile-overlay" onClick={() => setMobileMenu(false)} />}
-    <main className="main-content">{loading && <div className="info-strip"><Clock3 size={18} /><span>Carregando dados do banco local...</span></div>}<div className="mobile-top"><button onClick={() => setMobileMenu(true)}><Menu /></button><strong>IVIS<span>.</span></strong></div>{content[page]}</main>
+    <main className="main-content">{loading && <div className="info-strip"><Clock3 size={18} /><span>Carregando dados do banco local...</span></div>}<div className="mobile-top"><button onClick={() => setMobileMenu(true)}><Menu /></button><strong>IVIS<span>.</span></strong></div>{content}</main>
     {toast && <div className="toast"><CheckCircle2 size={17} />{toast}</div>}
   </div>
 }
