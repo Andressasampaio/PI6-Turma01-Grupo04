@@ -3,6 +3,9 @@ from flask_cors import CORS
 from pathlib import Path
 from uuid import uuid4
 from werkzeug.utils import secure_filename
+import json
+import unicodedata
+from threading import Lock
 
 from yolo_detector import detect_image
 from ocr_processor import processar_etiqueta
@@ -14,13 +17,82 @@ CORS(app)
 
 initialize_database()
 
+# Impede duas importações simultâneas (ex.: React StrictMode no desenvolvimento).
+IMPORT_TEST_IMAGES_LOCK = Lock()
+
+
+# Gabarito fixo utilizado no protótipo (Paracetamol 750mg).
+GABARITO = {
+    "lote": "L100648",
+    "fabricacao": "JUL/2025",
+    "validade": "JUL/2027",
+}
+
+
+def normalizar_leitura(valor):
+    texto = str(valor or "").upper().strip()
+    texto = unicodedata.normalize("NFD", texto)
+    texto = "".join(char for char in texto if unicodedata.category(char) != "Mn")
+    return "".join(texto.split())
+
+
+def avaliar_conformidade_gabarito(detected, ocr):
+    lote = ocr.get("lote")
+    fabricacao = ocr.get("fabricacao")
+    validade = ocr.get("validade")
+    legivel = all(normalizar_leitura(v) not in ("", "NAOIDENTIFICADO", "NAOLEGIVEL")
+                  for v in (lote, fabricacao, validade))
+    if not detected:
+        return "Não Conforme", "Embalagem não localizada pelo YOLO"
+    if not legivel:
+        return "Não Conforme", "Etiqueta ilegível ou leitura OCR incompleta"
+
+    divergencias = []
+    for campo, rotulo in (("lote", "Lote"), ("fabricacao", "Fabricação"), ("validade", "Validade")):
+        if normalizar_leitura(ocr.get(campo)) != normalizar_leitura(GABARITO[campo]):
+            divergencias.append(f"{rotulo} divergente: {ocr.get(campo)} (gabarito {GABARITO[campo]})")
+    if divergencias:
+        return "Não Conforme", "; ".join(divergencias)
+    return "Conforme", "Lote, fabricação e validade correspondem ao gabarito"
+
+
+def ensure_inspection_columns():
+    connection = get_connection()
+    inspection_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(inspections)").fetchall()
+    }
+    for column, column_type in {
+        "manufacturing_read": "TEXT",
+        "expected_manufacturing": "TEXT",
+        "annotated_image": "TEXT",
+        "crop_image": "TEXT",
+        "ocr_errors": "TEXT",
+        "detected": "INTEGER",
+    }.items():
+        if column not in inspection_columns:
+            connection.execute(f"ALTER TABLE inspections ADD COLUMN {column} {column_type}")
+
+    feedback_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(feedbacks)").fetchall()
+    }
+    if "corrected_manufacturing" not in feedback_columns:
+        connection.execute("ALTER TABLE feedbacks ADD COLUMN corrected_manufacturing TEXT")
+
+    connection.commit()
+    connection.close()
+
+
+ensure_inspection_columns()
+
 # Pastas utilizadas pelo processamento de imagens
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 PROCESSED_DIR = BASE_DIR / "processed"
+TEST_IMAGES_DIR = BASE_DIR / "test_images"
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 PROCESSED_DIR.mkdir(exist_ok=True)
+TEST_IMAGES_DIR.mkdir(exist_ok=True)
 
 
 # Verifica se o backend está funcionando
@@ -31,6 +103,129 @@ def health():
         "system": "IVIS",
         "message": "Backend funcionando corretamente"
     }), 200
+
+
+
+@app.route("/api/import-test-images", methods=["POST"])
+def import_test_images():
+    """Importa imagens novas uma única vez, sem manter transação aberta durante YOLO/OCR."""
+    if not IMPORT_TEST_IMAGES_LOCK.acquire(blocking=False):
+        return jsonify({
+            "message": "A importação já está em andamento.",
+            "imported_count": 0,
+            "imported": [],
+            "errors": [],
+            "busy": True,
+        }), 200
+
+    extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+    imported = []
+    errors = []
+
+    try:
+        for image_file in sorted(TEST_IMAGES_DIR.iterdir(), key=lambda item: item.name.lower()):
+            if not image_file.is_file() or image_file.suffix.lower() not in extensions:
+                continue
+
+            stored_path = f"test_images/{image_file.name}"
+
+            # Consulta e fecha a conexão antes de executar o processamento pesado.
+            check_connection = get_connection()
+            exists = check_connection.execute(
+                "SELECT id FROM inspections WHERE image_path = ?", (stored_path,)
+            ).fetchone()
+            check_connection.close()
+            if exists:
+                existing_connection = get_connection()
+                try:
+                    existing = existing_connection.execute(
+                        "SELECT id, lot_read, manufacturing_read, expiry_read, detected, ai_status "
+                        "FROM inspections WHERE image_path = ?", (stored_path,)
+                    ).fetchone()
+                    if existing and existing["ai_status"] == "Em avaliação":
+                        existing_ocr = {
+                            "lote": existing["lot_read"],
+                            "fabricacao": existing["manufacturing_read"],
+                            "validade": existing["expiry_read"],
+                        }
+                        updated_status, updated_finding = avaliar_conformidade_gabarito(
+                            bool(existing["detected"]), existing_ocr
+                        )
+                        existing_connection.execute("""
+                            UPDATE inspections
+                            SET expected_lot = ?, expected_expiry = ?, expected_manufacturing = ?,
+                                ai_status = ?, ai_finding = ?
+                            WHERE id = ?
+                        """, (GABARITO["lote"], GABARITO["validade"], GABARITO["fabricacao"],
+                              updated_status, updated_finding, existing["id"]))
+                        existing_connection.commit()
+                finally:
+                    existing_connection.close()
+                continue
+
+            try:
+                detection = detect_image(image_file)
+                detected = bool(detection.get("detected"))
+                ocr = {}
+                annotated_name = (
+                    Path(detection["annotated_image"]).name
+                    if detection.get("annotated_image") else None
+                )
+                crop_name = (
+                    Path(detection["crop_image"]).name
+                    if detection.get("crop_image") else None
+                )
+
+                if detected and detection.get("crop_image"):
+                    ocr = processar_etiqueta(detection["crop_image"])
+
+                lot = ocr.get("lote")
+                manufacturing = ocr.get("fabricacao")
+                expiry = ocr.get("validade")
+                ocr_errors = ocr.get("erros", [])
+
+                ai_status, finding = avaliar_conformidade_gabarito(detected, ocr)
+
+                # Abre a conexão somente para gravar uma inspeção e confirma logo em seguida.
+                connection = get_connection()
+                try:
+                    cursor = connection.execute("""
+                        INSERT OR IGNORE INTO inspections (
+                            product, lot_read, expected_lot, expiry_read, expected_expiry,
+                            ai_status, ai_finding, image_path, operator_status, operator_action,
+                            manufacturing_read, expected_manufacturing, annotated_image,
+                            crop_image, ocr_errors, detected
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        "Paracetamol 750mg", lot, GABARITO["lote"], expiry, GABARITO["validade"],
+                        ai_status, finding, stored_path,
+                        manufacturing, GABARITO["fabricacao"], annotated_name, crop_name,
+                        json.dumps(ocr_errors, ensure_ascii=False), 1 if detected else 0,
+                    ))
+                    connection.commit()
+                    if cursor.rowcount:
+                        imported.append({"id": cursor.lastrowid, "filename": image_file.name})
+                finally:
+                    connection.close()
+
+            except Exception as error:
+                errors.append({"filename": image_file.name, "error": str(error)})
+
+        return jsonify({
+            "message": "Importação automática concluída",
+            "imported_count": len(imported),
+            "imported": imported,
+            "errors": errors,
+        }), 200
+    finally:
+        IMPORT_TEST_IMAGES_LOCK.release()
+
+
+@app.route("/api/test-images/<path:filename>", methods=["GET"])
+def get_test_image(filename):
+    return send_from_directory(TEST_IMAGES_DIR, filename)
+
 
 # Executa a detecção da etiqueta com o YOLO
 @app.route("/api/detect", methods=["POST"])
@@ -139,12 +334,13 @@ def create_inspection():
         feedback_cursor = connection.execute("""
             INSERT INTO feedbacks (
                 inspection_id, original_status, corrected_status,
-                corrected_lot, corrected_expiry, correction_note
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                corrected_lot, corrected_expiry, correction_note,
+                corrected_manufacturing
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             inspection_id, data.get("ai_status"), data.get("corrected_status"),
             data.get("corrected_lot"), data.get("corrected_expiry"),
-            data.get("correction_note")
+            data.get("correction_note"), data.get("corrected_manufacturing")
         ))
         feedback_id = feedback_cursor.lastrowid
         connection.execute("""
@@ -212,16 +408,18 @@ def create_feedback(inspection_id):
             corrected_status,
             corrected_lot,
             corrected_expiry,
-            correction_note
+            correction_note,
+            corrected_manufacturing
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
         inspection_id,
         inspection["ai_status"],
         data["corrected_status"],
         data.get("corrected_lot"),
         data.get("corrected_expiry"),
-        data.get("correction_note")
+        data.get("correction_note"),
+        data.get("corrected_manufacturing")
     ))
 
     connection.execute("""
