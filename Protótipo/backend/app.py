@@ -23,7 +23,7 @@ IMPORT_TEST_IMAGES_LOCK = Lock()
 
 # Gabarito fixo utilizado no protótipo (Paracetamol 750mg).
 GABARITO = {
-    "lote": "L100648",
+    "lote": "100648",
     "fabricacao": "JUL/2025",
     "validade": "JUL/2027",
 }
