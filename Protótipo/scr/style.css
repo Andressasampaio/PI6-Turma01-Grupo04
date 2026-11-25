@@ -167,7 +167,6 @@ footer { display: flex; justify-content: space-between; color: #a2aabb; font-siz
 .result-confidence { padding: 13px; background: #f7f9fe; border-radius: 9px; margin-bottom: 15px; }
 .data-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .data-fields > div { padding: 11px; border: 1px solid #edf0f5; border-radius: 8px; }
-.data-fields > div:first-child { grid-column: 1/-1; }
 .data-fields label { display: block; color: #9aa5b6; font-size: 8px; letter-spacing: .6px; margin-bottom: 7px; }
 .data-fields strong { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #354662; }
 .data-fields strong svg { color: #25ac80; }
@@ -287,6 +286,15 @@ footer { display: flex; justify-content: space-between; color: #a2aabb; font-siz
 .history-action { color: #718099; font-size: 10px; }
 .correction-cell { min-width: 220px; max-width: 300px; white-space: normal; line-height: 1.5; }
 .empty-state { padding: 28px; text-align: center; color: #98a2b2; font-size: 12px; }
+/* Gabarito por processo (etapa 5) */
+.gabarito-panel { display: flex; flex-direction: column; gap: 12px; }
+.gabarito-panel > .secondary-button { align-self: flex-start; }
+.gabarito-note { margin: 0; color: #7c899d; font-size: 11px; line-height: 1.5; }
+.gabarito-alert { display: flex; align-items: center; gap: 8px; }
+.gabarito-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.gabarito-options { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-weight: 400; }
+.gabarito-options .tag { border: 0; }
+.result-verdict.pending { color: #c88a30; background: #fff6e7; }
 button:disabled, input:disabled, select:disabled { opacity: .6; cursor: not-allowed; }
 @media (max-width: 700px) {
   .reference-values { grid-template-columns: 1fr; }
@@ -496,4 +504,92 @@ button:disabled, input:disabled, select:disabled { opacity: .6; cursor: not-allo
 
 .inspection-stats .compact-stat:nth-child(4) > strong {
   color: #d89a42 !important;
+}
+
+
+/* Enquadramento das imagens reais nas telas de inspeção e correção */
+.dataset-stage {
+  height: min(62vh, 620px);
+  min-height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  overflow: hidden;
+  background: #f3f5f9;
+}
+.dataset-stage .dataset-image {
+  display: block;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center;
+  border-radius: 4px;
+}
+@media (max-width: 700px) {
+  .dataset-stage {
+    height: 430px;
+    min-height: 360px;
+    padding: 10px;
+  }
+}
+
+.video-upload-panel {
+  margin-bottom: 22px;
+}
+
+.video-upload-area {
+  min-height: 190px;
+  border: 2px dashed #cbd5e1;
+  border-radius: 13px;
+  background: #f8faff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: .2s;
+  padding: 25px;
+  text-align: center;
+}
+
+.video-upload-area:hover {
+  border-color: #3867e8;
+  background: #f1f5ff;
+}
+
+.video-upload-area input {
+  display: none;
+}
+
+.video-upload-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 15px;
+  background: #e8efff;
+  color: #3867e8;
+  display: grid;
+  place-items: center;
+}
+
+.video-upload-area strong {
+  color: #1e293b;
+  font-size: 14px;
+}
+
+.video-upload-area span {
+  color: #8993a7;
+  font-size: 12px;
+}
+
+.video-upload-error {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #fff0f0;
+  color: #c03939;
+  font-size: 12px;
 }
