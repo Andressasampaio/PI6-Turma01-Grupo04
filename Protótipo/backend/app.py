@@ -7,10 +7,14 @@ import json
 import unicodedata
 from threading import Lock
 
-from yolo_detector import detect_image
-from ocr_processor import processar_etiqueta
+from yolo_detector import detect_image, detect_video_packages
+from ocr_processor import processar_etiqueta, processar_embalagem
 
 from database import initialize_database, get_connection
+from gabarito import (
+    CAMPOS as CAMPOS_GABARITO, NOMES_CAMPOS, STATUS_DEFINIDO, STATUS_PENDENTE,
+    ORIGEM_MANUAL, definir_gabarito, classificar, normalizar_valor,
+)
 
 app = Flask(__name__)
 CORS(app)
@@ -27,6 +31,17 @@ GABARITO = {
     "fabricacao": "JUL/2025",
     "validade": "JUL/2027",
 }
+
+
+# Valor padronizado para campo que o OCR não conseguiu ler (nunca inventar).
+NAO_IDENTIFICADO = "Não identificado"
+
+
+def padronizar_campo(valor):
+    texto = str(valor or "").strip()
+    if normalizar_leitura(texto) in ("", "NAOIDENTIFICADO", "NAOLEGIVEL", "NONE"):
+        return NAO_IDENTIFICADO
+    return texto
 
 
 def normalizar_leitura(valor):
@@ -293,6 +308,404 @@ def detect():
             upload_path.unlink()
 
 
+@app.route("/api/detect-video", methods=["POST"])
+def detect_video():
+    if "video" not in request.files:
+        return jsonify({"error": "Nenhum vídeo foi enviado"}), 400
+
+    file = request.files["video"]
+
+    if not file.filename:
+        return jsonify({"error": "Nome do vídeo inválido"}), 400
+
+    allowed_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+    extension = Path(file.filename).suffix.lower()
+
+    if extension not in allowed_extensions:
+        return jsonify({"error": "Formato de vídeo não suportado"}), 400
+
+    filename = secure_filename(file.filename)
+    upload_path = UPLOAD_DIR / f"{uuid4().hex}_{filename}"
+
+    file.save(upload_path)
+
+    try:
+        # O mesmo arquivo enviado de novo geraria inspeções duplicadas.
+        # Só reprocessa se o operador pedir explicitamente (reprocessar=1).
+        video_hash = _hash_arquivo(upload_path)
+        if request.form.get("reprocessar") != "1":
+            connection = get_connection()
+            existente = connection.execute(
+                "SELECT id, created_at FROM processes WHERE video_hash = ? ORDER BY id DESC LIMIT 1",
+                (video_hash,)
+            ).fetchone()
+            connection.close()
+            if existente:
+                return jsonify({
+                    "error": (f"Este vídeo já foi processado (processo #{existente['id']}). "
+                              "Envie novamente marcando a opção de reprocessar se quiser repetir."),
+                    "duplicate": True,
+                    "process_id": existente["id"],
+                }), 409
+
+        detected_packages = detect_video_packages(upload_path)
+
+        if not detected_packages:
+            return jsonify({
+                "error": "Nenhuma embalagem foi identificada no vídeo."
+            }), 422
+
+        # Ordem de entrada na cena: define quem são as 3 primeiras embalagens.
+        detected_packages = sorted(
+            detected_packages,
+            key=lambda p: (p.get("first_frame", p.get("frame", 0)), p["track_id"])
+        )
+
+        # 1) OCR de cada embalagem, isoladamente.
+        leituras = []
+        for package in detected_packages:
+            crop_path = package["crop_image"]
+            # OCR só com recortes desta embalagem (melhor quadro + extras).
+            ocr = processar_embalagem(package.get("ocr_crops") or [crop_path])
+            ocr["lote"] = normalizar_lote(ocr.get("lote"))
+            leituras.append(ocr)
+
+        # 2) Gabarito deste processo, a partir das 3 primeiras embalagens válidas.
+        definicao = definir_gabarito([
+            {"chave": i, **{c: leituras[i].get(c) for c in CAMPOS_GABARITO}}
+            for i in range(len(leituras))
+        ])
+        referencias = set(definicao["referencias"])
+
+        inspections = []
+        connection = get_connection()
+
+        try:
+            process_id = connection.execute(
+                "INSERT INTO processes (video_name, total_packages, video_hash) VALUES (?, ?, ?)",
+                (filename, len(detected_packages), video_hash)
+            ).lastrowid
+            gabarito = _inserir_gabarito(connection, process_id, definicao)
+
+            for sequence, (package, ocr) in enumerate(
+                zip(detected_packages, leituras), start=1
+            ):
+                crop_path = package["crop_image"]
+
+                # 3) Cada embalagem é comparada só com o gabarito do seu processo.
+                ai_status, finding = classificar(ocr, gabarito)
+
+                lot = padronizar_campo(ocr.get("lote"))
+                manufacturing = padronizar_campo(ocr.get("fabricacao"))
+                expiry = padronizar_campo(ocr.get("validade"))
+                # Erros bloqueantes e avisos de qualidade ficam juntos no histórico.
+                ocr_errors = ocr.get("erros", []) + ocr.get("avisos", [])
+
+                crop_name = Path(crop_path).name
+                annotated_name = Path(
+                    package["annotated_image"]
+                ).name
+
+                image_path = (
+                    f"video:{filename}#track:{package['track_id']}"
+                )
+
+                cursor = connection.execute("""
+                    INSERT INTO inspections (
+                        product,
+                        lot_read,
+                        expected_lot,
+                        expiry_read,
+                        expected_expiry,
+                        ai_status,
+                        ai_finding,
+                        image_path,
+                        operator_status,
+                        operator_action,
+                        manufacturing_read,
+                        expected_manufacturing,
+                        annotated_image,
+                        crop_image,
+                        ocr_errors,
+                        detected,
+                        process_id,
+                        sequence,
+                        track_id,
+                        selected_frame,
+                        selected_time_s,
+                        quality_score,
+                        is_reference
+                    )
+                    VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?,
+                        NULL, NULL, ?, ?, ?, ?, ?, 1,
+                        ?, ?, ?, ?, ?, ?, ?
+                    )
+                """, (
+                    "Paracetamol 750mg",
+                    lot,
+                    _valor_esperado(gabarito, "lote"),
+                    expiry,
+                    _valor_esperado(gabarito, "validade"),
+                    ai_status,
+                    finding,
+                    image_path,
+                    manufacturing,
+                    _valor_esperado(gabarito, "fabricacao"),
+                    annotated_name,
+                    crop_name,
+                    json.dumps(ocr_errors, ensure_ascii=False),
+                    process_id,
+                    sequence,
+                    package["track_id"],
+                    package.get("frame"),
+                    package.get("timestamp_s"),
+                    package.get("quality_score"),
+                    1 if (sequence - 1) in referencias else 0,
+                ))
+
+                inspections.append({
+                    "id": cursor.lastrowid,
+                    "process_id": process_id,
+                    "sequence": sequence,
+                    "is_reference": (sequence - 1) in referencias,
+                    "track_id": package["track_id"],
+                    "lot_read": lot,
+                    "manufacturing_read": manufacturing,
+                    "expiry_read": expiry,
+                    "ai_status": ai_status,
+                    "ai_finding": finding,
+                    "confidence": package["confidence"],
+                    "quality_score": package.get("quality_score"),
+                    "frame": package.get("frame"),
+                    "timestamp_s": package.get("timestamp_s"),
+                    "ocr_readings": ocr.get("leituras", []),
+                    "ocr_warnings": ocr.get("avisos", []),
+                    "annotated_image": annotated_name,
+                    "crop_image": crop_name
+                })
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+
+        finally:
+            connection.close()
+
+        return jsonify({
+            "message": "Vídeo processado com sucesso",
+            "process_id": process_id,
+            "gabarito": _gabarito_publico(gabarito, inspections),
+            "total_inspecoes": len(inspections),
+            "inspections": inspections
+        }), 200
+
+    except Exception as error:
+        return jsonify({
+            "error": str(error)
+        }), 500
+
+    finally:
+        if upload_path.exists():
+            upload_path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Gabarito por processo (etapa 5)
+# ---------------------------------------------------------------------------
+VALOR_PENDENTE = "Pendente"
+
+
+def _hash_arquivo(caminho):
+    import hashlib
+    h = hashlib.sha256()
+    with open(caminho, "rb") as f:
+        for bloco in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(bloco)
+    return h.hexdigest()
+
+
+def _valor_esperado(gabarito, campo):
+    return gabarito.get(campo) or VALOR_PENDENTE
+
+
+def _json(valor):
+    return json.dumps(valor, ensure_ascii=False)
+
+
+def _registrar_evento(connection, gabarito_id, acao, anteriores, novos, observacao=None):
+    connection.execute("""
+        INSERT INTO gabarito_eventos (gabarito_id, acao, valores_anteriores, valores_novos, observacao)
+        VALUES (?, ?, ?, ?, ?)
+    """, (gabarito_id, acao, _json(anteriores), _json(novos), observacao))
+
+
+def _inserir_gabarito(connection, process_id, definicao):
+    # As chaves das referências são índices na ordem de entrada; no banco
+    # guardamos o número de sequência da embalagem (1, 2, 3...).
+    leituras = [
+        {**{c: l[c] for c in CAMPOS_GABARITO}, "sequence": l["chave"] + 1}
+        for l in definicao["leituras_referencia"]
+    ]
+    gabarito_id = connection.execute("""
+        INSERT INTO gabaritos (process_id, lote, fabricacao, validade, status, origem,
+                               motivo, divergencias, leituras_referencia)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        process_id, definicao["lote"], definicao["fabricacao"], definicao["validade"],
+        definicao["status"], definicao["origem"], definicao["motivo"],
+        _json(definicao["divergencias"]), _json(leituras),
+    )).lastrowid
+    _registrar_evento(
+        connection, gabarito_id, "Definição automática", None,
+        {c: definicao[c] for c in CAMPOS_GABARITO} | {"status": definicao["status"]},
+        definicao["motivo"],
+    )
+    return _carregar_gabarito(connection, process_id)
+
+
+def _carregar_gabarito(connection, process_id):
+    row = connection.execute(
+        "SELECT * FROM gabaritos WHERE process_id = ?", (process_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    gabarito = dict(row)
+    gabarito["divergencias"] = json.loads(gabarito["divergencias"] or "[]")
+    gabarito["leituras_referencia"] = json.loads(gabarito["leituras_referencia"] or "[]")
+    return gabarito
+
+
+def _gabarito_publico(gabarito, inspections=None):
+    """Gabarito com as 3 embalagens de referência ligadas às inspeções."""
+    if gabarito is None:
+        return None
+    publico = dict(gabarito)
+    if inspections is not None:
+        por_sequencia = {i["sequence"]: i["id"] for i in inspections}
+        for leitura in publico["leituras_referencia"]:
+            leitura["inspection_id"] = por_sequencia.get(leitura["sequence"])
+    publico["pendente"] = gabarito["status"] != STATUS_DEFINIDO
+    return publico
+
+
+def _reclassificar_processo(connection, process_id, gabarito):
+    """Reavalia as inspeções do processo ainda não avaliadas pelo operador."""
+    rows = connection.execute("""
+        SELECT id, lot_read, manufacturing_read, expiry_read FROM inspections
+        WHERE process_id = ? AND operator_status IS NULL
+    """, (process_id,)).fetchall()
+    for row in rows:
+        leitura = {
+            "lote": row["lot_read"],
+            "fabricacao": row["manufacturing_read"],
+            "validade": row["expiry_read"],
+        }
+        status, finding = classificar(leitura, gabarito)
+        connection.execute("""
+            UPDATE inspections
+            SET ai_status = ?, ai_finding = ?, expected_lot = ?,
+                expected_manufacturing = ?, expected_expiry = ?
+            WHERE id = ?
+        """, (status, finding, _valor_esperado(gabarito, "lote"),
+              _valor_esperado(gabarito, "fabricacao"),
+              _valor_esperado(gabarito, "validade"), row["id"]))
+    return len(rows)
+
+
+@app.route("/api/processes", methods=["GET"])
+def list_processes():
+    connection = get_connection()
+    rows = connection.execute("""
+        SELECT p.*, g.status AS gabarito_status, g.lote AS gabarito_lote,
+               g.fabricacao AS gabarito_fabricacao, g.validade AS gabarito_validade,
+               g.origem AS gabarito_origem
+        FROM processes p LEFT JOIN gabaritos g ON g.process_id = p.id
+        ORDER BY p.id DESC
+    """).fetchall()
+    connection.close()
+    return jsonify([dict(r) for r in rows]), 200
+
+
+@app.route("/api/processes/<int:process_id>", methods=["GET"])
+def get_process(process_id):
+    connection = get_connection()
+    process = connection.execute(
+        "SELECT * FROM processes WHERE id = ?", (process_id,)
+    ).fetchone()
+    if process is None:
+        connection.close()
+        return jsonify({"error": "Processo não encontrado"}), 404
+    inspections = [dict(r) for r in connection.execute(
+        "SELECT * FROM inspections WHERE process_id = ? ORDER BY sequence", (process_id,)
+    ).fetchall()]
+    gabarito = _carregar_gabarito(connection, process_id)
+    eventos = []
+    if gabarito:
+        eventos = [dict(r) for r in connection.execute(
+            "SELECT * FROM gabarito_eventos WHERE gabarito_id = ? ORDER BY id", (gabarito["id"],)
+        ).fetchall()]
+    connection.close()
+    return jsonify({
+        "process": dict(process),
+        "gabarito": _gabarito_publico(gabarito, inspections),
+        "gabarito_eventos": eventos,
+        "inspections": inspections,
+    }), 200
+
+
+@app.route("/api/processes/<int:process_id>/gabarito", methods=["POST"])
+def confirm_gabarito(process_id):
+    """Confirma (quando pendente) ou corrige o gabarito de UM processo."""
+    data = request.get_json(silent=True) or {}
+    novos = {c: str(data.get(c) or "").strip() for c in CAMPOS_GABARITO}
+    faltantes = [NOMES_CAMPOS[c] for c in CAMPOS_GABARITO if not normalizar_valor(c, novos[c])]
+    if faltantes:
+        return jsonify({"error": "Informe: " + ", ".join(faltantes)}), 400
+    novos["lote"] = normalizar_lote(novos["lote"])
+    novos["fabricacao"] = novos["fabricacao"].upper()
+    novos["validade"] = novos["validade"].upper()
+
+    connection = get_connection()
+    try:
+        gabarito = _carregar_gabarito(connection, process_id)
+        if gabarito is None:
+            return jsonify({"error": "Gabarito do processo não encontrado"}), 404
+
+        anteriores = {c: gabarito[c] for c in CAMPOS_GABARITO} | {"status": gabarito["status"]}
+        acao = ("Confirmação manual" if gabarito["status"] == STATUS_PENDENTE
+                else "Correção manual")
+        nota = (data.get("observacao") or "").strip() or None
+
+        connection.execute("""
+            UPDATE gabaritos
+            SET lote = ?, fabricacao = ?, validade = ?, status = ?, origem = ?,
+                motivo = ?, confirmed_at = CURRENT_TIMESTAMP, confirmation_note = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (novos["lote"], novos["fabricacao"], novos["validade"], STATUS_DEFINIDO,
+              ORIGEM_MANUAL, f"{acao} pelo operador.", nota, gabarito["id"]))
+        _registrar_evento(connection, gabarito["id"], acao, anteriores,
+                          novos | {"status": STATUS_DEFINIDO}, nota)
+
+        gabarito = _carregar_gabarito(connection, process_id)
+        reavaliadas = _reclassificar_processo(connection, process_id, gabarito)
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+    return jsonify({
+        "message": f"{acao} registrada",
+        "gabarito": _gabarito_publico(gabarito),
+        "inspecoes_reavaliadas": reavaliadas,
+    }), 200
+
+
 # Disponibiliza as imagens processadas pela API
 @app.route("/api/processed/<path:filename>", methods=["GET"])
 def get_processed_image(filename):
@@ -392,6 +805,48 @@ def get_inspection(inspection_id):
         return jsonify({"error": "Inspeção não encontrada"}), 404
 
     return jsonify(dict(inspection)), 200
+
+
+# Confirma uma inspeção já existente sem criar uma linha duplicada.
+@app.route("/api/inspections/<int:inspection_id>/confirm", methods=["POST"])
+def confirm_inspection(inspection_id):
+    data = request.get_json(silent=True) or {}
+    connection = get_connection()
+
+    inspection = connection.execute(
+        "SELECT id, ai_status, operator_status FROM inspections WHERE id = ?",
+        (inspection_id,)
+    ).fetchone()
+
+    if inspection is None:
+        connection.close()
+        return jsonify({"error": "Inspeção não encontrada"}), 404
+
+    if inspection["operator_status"]:
+        connection.close()
+        return jsonify({"error": "Esta inspeção já foi avaliada"}), 409
+
+    operator_status = data.get("operator_status") or inspection["ai_status"]
+    if operator_status not in ("Conforme", "Não Conforme"):
+        connection.close()
+        return jsonify({"error": "Veredito do operador inválido"}), 400
+
+    connection.execute("""
+        UPDATE inspections
+        SET operator_status = ?,
+            operator_action = ?,
+            reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    """, (operator_status, "Resultado confirmado pelo operador", inspection_id))
+
+    connection.commit()
+    connection.close()
+
+    return jsonify({
+        "message": "Inspeção confirmada com sucesso",
+        "inspection_id": inspection_id,
+        "operator_status": operator_status
+    }), 200
 
 
 # Registra a correção realizada pelo operador
